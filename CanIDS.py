@@ -29,12 +29,14 @@ prevIdx = {}
 curIdx = {}
 startAttack = {}
 endAttack = {}
+startSuspension = {}
+endSuspension = {}
 fastCount = {}
+slowCount = {}
 sum = {}
 count = {}
 score = {}
-globalScore = 0
-threshold = 5
+threshold = 3
 cwd = os.getcwd()
 file = "Attack_DataSet.asc"
 path = cwd + "\\" + file
@@ -42,14 +44,7 @@ data = np.genfromtxt(path, encoding='ascii', names=('time', 'ID'), dtype=None, s
 
 length = len(data)
 slowError = 2
-fastError = 0.7
-
-
-def init():
-    for k in period.keys():
-        startAttack[k] = 0
-        endAttack[k] = 0
-        fastCount[k] = 0
+fastError = 0.4
 
 
 def writeInterval(file, ID, interval):
@@ -77,18 +72,35 @@ def calcMean():
     return mean
 
 
-def printIndex(start, end, first=False):
-    if first:
-        print("This is first packet of this ID")
+def init():
+    for k in period.keys():
+        startAttack[k] = 0
+        endAttack[k] = 0
+        fastCount[k] = 0
+        slowCount[k] = 0
+        score[k] = [0, 0]
+
+
+def detectAttack(ID, interval, time):
+    m = mean[ID]
+    rate = interval / m
+    if rate > (1 + slowError):
+        countAttack(ID, type="slow")
+        detectSuspension(ID, time, interval, type="slow")
+        #print("Detect slow packet...")
+        #print("[slow](%d~%d)ID (%s) mean (%f) interval (%f) rate (%f) index (%d) " % (start, end, ID, m, interval, rate, count[ID]))
+    elif rate < (1 - fastError):
+        countAttack(ID, type="fast")
+        detectFabrication(ID, time, type="fast")
+        #print("Detect fast packet...")
+        #print("[fast](%d~%d)ID (%s) mean (%f) interval (%f) rate (%f) index (%d)" % (start, end, ID, m, interval, rate, count[ID]))
     else:
-        print("This packet is sent between Index(%d) and Index(%d)" % (start, end))
-        print("Difference of packet index is %d" % (end - start))
+        countAttack(ID, type="normal")
+        detectFabrication(ID, time, type="normal")
+        detectSuspension(ID, time, interval, type="normal")
 
 
 def countAttack(ID, type):
-    if ID not in score:
-        score[ID] = [0, 0]
-
     if type == "slow":
         score[ID][0] += 1
     elif type == "fast":
@@ -100,37 +112,7 @@ def countAttack(ID, type):
             score[ID][0] -= 1
 
 
-def detectAttack(ID, interval, time, error, start, end):
-    m = mean[ID]
-    rate = interval / m
-    calcSum(ID, interval)
-    if rate > (1 + slowError):
-        # printIndex(start, end)
-        countAttack(ID, type="slow")
-        # print("Detect slow packet...")
-        # print("[slow](%d~%d)ID (%s) mean (%f) interval (%f) rate (%f) index (%d) " % (start, end, ID, m, interval, rate, count[ID]))
-    elif rate < (1 - fastError):
-        countAttack(ID, type="fast")
-        detectFabrication(ID, interval, time, type="fast")
-        # print("Detect fast packet...")
-        # print("[fast](%d~%d)ID (%s) mean (%f) interval (%f) rate (%f) index (%d)" % (start, end, ID, m, interval, rate, count[ID]))
-    else:
-        countAttack(ID, type="normal")
-        detectFabrication(ID, interval, time, type="normal")
-
-    ''' 
-    if ID == "1F1":
-            print("[normal](%d~%d)ID (%s) mean (%f) interval (%f) rate (%f) index (%d) " % (start, end, ID, m, interval, rate, count[ID]))
-
-    elif ID == "1F1":
-        print("[normal](%d~%d)ID (%s) mean (%f) interval (%f) rate (%f) index (%d) " % (start, end, ID, m, interval, rate, count[ID]))
-    '''
-
-
-def detectFabrication(ID, interval, time, type):
-    m = mean[ID]
-    rate = interval / m
-    calcSum(ID, interval)
+def detectFabrication(ID, time, type):
     if type == "fast":
         if fastCount[ID] == 0:
             startAttack[ID] = time
@@ -141,42 +123,33 @@ def detectFabrication(ID, interval, time, type):
 
     if score[ID][1] == 0:
         if fastCount[ID] > 3:
-            print("Detect Fabrication Attack")
-            print("[%s]Attacked time %f ~ %f" % (ID, startAttack[ID], endAttack[ID]))
+            print("[!!]Detect Fabrication Attack[!!]")
+            print("[%s] Start time (%f) ~ End time (%f)\n[Time Interval] : %f\n\n" % (ID, startAttack[ID], endAttack[ID], (endAttack[ID] - startAttack[ID])))
 
         fastCount[ID] = 0
         startAttack[ID] = 0
         endAttack[ID] = 0
 
-    '''
-    if rate < (1 - error):
-        countAttack(ID, type="fast")
-        startAttack[ID] = time
-        print("[%d][%s]fast %d" % (count[ID], ID, score[ID][1]))
-    elif (1 - error) < rate < (1 + error):
-        countAttack(ID, type="normal")
 
-    if score[ID][1] > threshold:
-        print("[ID : %s] Detect Fabrication Attack..(%d)" % (ID, count[ID]))
-    '''
+def detectSuspension(ID, time, interval, type):
+    if type == "slow":
+        if slowCount[ID] == 0:
+            startSuspension[ID] = time - (interval / 1000)
+            endSuspension[ID] = time
 
+        slowCount[ID] += 1
 
-def detectSuspension(ID, interval, error=2.0):
-    m = mean[ID]
-    rate = interval / m
-
-    if rate > (1 + error):
-        countAttack(ID, type="slow")
-    elif 0.5 < rate < 1.5:
-        countAttack(ID, type="normal")
-
-    if score[ID][0] > 0:
-        print("[ID : %s] Detect Suspension Attack..(rate : %f)" % (ID, rate))
+    if score[ID][0] == 0:
+        if slowCount[ID] > 0:
+            print("[!!]Detect Suspension Attack[!!]")
+            print("[%s] Start time (%f) ~ End time (%f)\n[Time Interval] : %f\n\n" % (ID, startSuspension[ID], endSuspension[ID], (endSuspension[ID] - startSuspension[ID])))
+            slowCount[ID] = 0
+            startSuspension[ID] = 0
+            endSuspension[ID] = 0
 
 
 def main():
     init()
-    error = 0.8
     file = open('interval.csv', 'w', encoding='utf-8', newline='')
     for i in range(length):
         if data[i][1] in prevTime:
@@ -185,11 +158,8 @@ def main():
             curIdx[ID] = i
             interval = (curTime[ID] - prevTime[ID]) * 1000
             writeInterval(file, ID, interval)
-            # printIndex(prevIdx, currentIdx)
-            # calcSum(ID, interval)
-            detectAttack(ID, interval, curTime[ID], error, prevIdx[ID], curIdx[ID])
-            # detectFabrication(ID, interval)
-            # detectSuspension(ID, interval)
+            #calcSum(ID, interval)
+            detectAttack(ID, interval, curTime[ID])
             prevTime[ID] = data[i][0]
             prevIdx[ID] = i
         else:
@@ -198,8 +168,6 @@ def main():
                 continue
             prevTime[ID] = data[i][0]
             prevIdx[ID] = i
-            # printIndex(first=True)
-
     '''
     for k in score.keys():
         print("[%s] %d" % (k, count[k]))
